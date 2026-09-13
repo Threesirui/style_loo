@@ -1,0 +1,58 @@
+# ============================================================
+# 本仓库只收录代码与说明文档。
+# 数据集、特征缓存、实验结果、第三方 vendor 工具树一律不入库。
+# ============================================================
+
+# ---------- 数据与实验产物（体积大，不入库）----------
+data/
+artifacts/
+outputs/
+.nltk_data/
+.stanza_resources/
+
+# ---------- 第三方 vendor 工具树（非本项目代码）----------
+.codex/
+
+# ---------- Python 运行与构建产物 ----------
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+env/
+
+# ---------- 测试与检查缓存 ----------
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.ipynb_checkpoints/
+
+# ---------- 模型权重与张量缓存 ----------
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+*.npz
+*.onnx
+*.h5
+models/
+
+# ---------- 环境变量与密钥 ----------
+.env
+.env.*
+*.pem
+*.key
+
+# ---------- 编辑器与操作系统 ----------
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini

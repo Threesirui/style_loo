@@ -1,0 +1,2 @@
+{"id":"human-1","text":"A careful writer revises each sentence and chooses words deliberately.","label":0,"model":"human","source":"example"}
+{"id":"ai-1","text":"The generated response presents a clear summary with consistent wording.","label":1,"model":"example-ai","source":"example"}

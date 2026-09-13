@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "styleslip"
+version = "0.1.0"
+description = "Standalone StyleDistance leave-one-out waves for text analysis"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "numpy>=1.26,<3",
+  "nltk>=3.9,<4",
+  "scikit-learn>=1.4,<2",
+  "torch>=2.2,<3",
+  "tqdm>=4.66,<5",
+]
+
+[project.optional-dependencies]
+model = ["sentence-transformers>=5,<6"]
+dev = ["pytest>=8,<10"]
+
+[project.scripts]
+styleslip = "styleslip.cli:main"
+styleslip-experiment = "styleslip.experiment:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-ra"
