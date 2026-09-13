@@ -50,3 +50,32 @@ def test_unlabeled_records_are_supported() -> None:
         sentence_tokenizer=single_sentence,
     )
     assert "labels" not in arrays
+
+
+class SelectivelyConstantEncoder(FakeStyleEncoder):
+    def encode(self, sentences, **kwargs):
+        rows = super().encode(sentences, **kwargs)
+        for index, sentence in enumerate(sentences):
+            if "degenerate" in sentence:
+                rows[index] = np.arange(1, rows.shape[1] + 1, dtype=np.float32)
+        return rows
+
+
+def test_documents_without_finite_directions_are_skipped_with_metadata_aligned() -> None:
+    records = [
+        TextRecord("Normal useful words are here.", id="keep", label=0),
+        TextRecord("degenerate degenerate words remain identical.", id="skip", label=1),
+        TextRecord("Another generated example appears here.", id="keep-2", label=1),
+    ]
+    arrays = extract_records(
+        records,
+        SelectivelyConstantEncoder(),
+        config=StyleLooConfig(output_length=8),
+        document_batch_size=3,
+        sentence_tokenizer=single_sentence,
+    )
+    assert arrays["waves"].shape == (2, 3, 8)
+    assert arrays["ids"].tolist() == ["keep", "keep-2"]
+    assert arrays["labels"].tolist() == [0, 1]
+    assert arrays["skipped_ids"].tolist() == ["skip"]
+    assert len(arrays["style_token_counts"]) == 2

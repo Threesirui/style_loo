@@ -95,6 +95,8 @@ def extract_records(
     context_counts = []
     eligible_counts = []
     concentrations = []
+    retained_records: list[TextRecord] = []
+    skipped_ids: list[str] = []
     for start in tqdm(
         range(0, len(records), document_batch_size),
         desc="StyleDistance LOO",
@@ -106,7 +108,22 @@ def extract_records(
             config=config,
             sentence_tokenizer=sentence_tokenizer,
         )
-        blocks.append(result.waves)
+        batch_records = records[start : start + document_batch_size]
+        retained_records.extend(batch_records[index] for index in result.document_indices)
+        batch_skipped_ids = [batch_records[index].id for index in result.skipped_document_indices]
+        batch_skipped_labels = [
+            batch_records[index].id or f"input index {start + index}"
+            for index in result.skipped_document_indices
+        ]
+        if batch_skipped_ids:
+            skipped_ids.extend(batch_skipped_ids)
+            LOGGER.warning(
+                "Skipping %d document(s) with no finite leave-one-out directions: %s",
+                len(batch_skipped_labels),
+                ", ".join(batch_skipped_labels),
+            )
+        if len(result.waves):
+            blocks.append(result.waves)
         token_counts.append(result.token_counts)
         context_counts.append(result.context_counts)
         eligible_counts.append(result.eligible_token_counts)
@@ -114,6 +131,10 @@ def extract_records(
         del result
         gc.collect()
 
+    if not retained_records:
+        raise ValueError("all documents were skipped because none produced finite LOO directions")
+
+    records = retained_records
     labels = [record.label for record in records]
     if any(label is None for label in labels) and not all(label is None for label in labels):
         raise ValueError("label must be present for every record or absent from every record")
@@ -128,6 +149,7 @@ def extract_records(
         "fingerprints": np.asarray(
             [text_fingerprint(record.text) for record in records], dtype=np.str_
         ),
+        "skipped_ids": np.asarray(skipped_ids, dtype=np.str_),
         "style_token_counts": np.concatenate(token_counts),
         "style_context_counts": np.concatenate(context_counts),
         "style_eligible_token_counts": np.concatenate(eligible_counts),
@@ -210,7 +232,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         "status": "completed",
         "input": str(args.input.expanduser().resolve()),
         "output": str(output),
-        "documents": len(records),
+        "documents": len(arrays["waves"]),
+        "selected_documents": len(records),
+        "skipped_documents": len(records) - len(arrays["waves"]),
         "shape": list(arrays["waves"].shape),
         "labeled": "labels" in arrays,
         "channels": list(STYLE_CHANNEL_NAMES),

@@ -153,6 +153,7 @@ class FeatureCache:
             config=config,
             document_batch_size=document_batch_size,
         )
+        output_samples = int(len(arrays["waves"]))
         extraction_config = {
             "feature_set": "style-loo",
             "channels": list(STYLE_CHANNEL_NAMES),
@@ -181,7 +182,9 @@ class FeatureCache:
                         "status": "completed",
                         "spec": spec,
                         "archive": str(archive_path),
-                        "samples": len(records),
+                        "samples": output_samples,
+                        "selected_samples": len(records),
+                        "skipped_samples": len(records) - output_samples,
                         "shape": list(arrays["waves"].shape),
                     },
                     ensure_ascii=False,
@@ -193,7 +196,7 @@ class FeatureCache:
         finally:
             if temporary is not None and temporary.exists():
                 temporary.unlink()
-        return CacheResult(archive_path, key, False, len(records))
+        return CacheResult(archive_path, key, False, output_samples)
 
 
 __all__ = ["CacheResult", "FeatureCache", "cache_key", "cache_spec"]

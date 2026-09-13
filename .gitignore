@@ -9,6 +9,7 @@ artifacts/
 outputs/
 .nltk_data/
 .stanza_resources/
+model/
 
 # ---------- 第三方 vendor 工具树（非本项目代码）----------
 .codex/

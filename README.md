@@ -78,6 +78,17 @@ JSONL 和 CSV 默认读取 `text` 与可选的 `label` 字段；标签可以是 
 
 测试使用确定性的假编码器，不下载模型，也不占用 GPU。
 
+## 论文与开源代码可追溯的传统基线
+
+新增的 `baselines/` 入口实现 `Enhanced TF-IDF-SVM` 与 `Stylometric-LR`，并另外保留
+PAN'25 官方 TF-IDF-SVM 的严格配置。来源、论文/源码差异、运行命令和输出协议见
+[`baselines/README.md`](baselines/README.md)。默认运行用户要求的前两项：
+
+```powershell
+$python = "C:\Users\three\.conda\envs\TextWave\python.exe"
+& $python .\baselines\run.py --dataset m4 --scenario monolingual
+```
+
 ## 数据集实验入口
 
 统一实验入口是 `experiment.py`。它只启用本项目需要的三类协议：

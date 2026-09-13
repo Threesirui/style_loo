@@ -92,6 +92,8 @@ class TokenContext:
 @dataclass(slots=True)
 class StyleWaveBatch:
     waves: NDArray[np.float32]
+    document_indices: NDArray[np.int64]
+    skipped_document_indices: NDArray[np.int64]
     token_counts: NDArray[np.int32]
     context_counts: NDArray[np.int32]
     eligible_token_counts: NDArray[np.int32]
@@ -213,11 +215,6 @@ def build_style_loo_waves(
         [sum(len(context.tokens) for context in contexts) for contexts in contexts_by_document],
         dtype=np.int32,
     )
-    if np.any(token_counts == 0):
-        raise ValueError(
-            f"document(s) produced no tokens: {np.flatnonzero(token_counts == 0).tolist()}"
-        )
-
     detokenizer = TreebankWordDetokenizer()
     full_texts: list[str] = []
     variant_texts: list[str] = []
@@ -236,13 +233,14 @@ def build_style_loo_waves(
                 variant = tokens[:local_index] + tokens[local_index + 1 :]
                 variant_texts.append(detokenizer.detokenize(variant))
                 mappings.append((document_index, position, full_index, variant_index))
-    if not mappings:
-        raise ValueError("documents produced no eligible alphabetic leave-one-out tokens")
-
-    full_embeddings = _normalized_embeddings(
-        encoder, full_texts, batch_size=cfg.encode_batch_size
-    )
-    dimension = int(full_embeddings.shape[1])
+    if mappings:
+        full_embeddings = _normalized_embeddings(
+            encoder, full_texts, batch_size=cfg.encode_batch_size
+        )
+        dimension = int(full_embeddings.shape[1])
+    else:
+        full_embeddings = np.empty((0, 0), dtype=np.float32)
+        dimension = 0
     magnitudes = [np.full(int(count), np.nan, dtype=np.float32) for count in token_counts]
     directions = [
         np.full((int(count), dimension), np.nan, dtype=np.float32)
@@ -268,13 +266,19 @@ def build_style_loo_waves(
     waves: list[NDArray[np.float32]] = []
     concentrations: list[float] = []
     eligible_counts: list[int] = []
+    document_indices: list[int] = []
+    skipped_document_indices: list[int] = []
     magnitude_sum = 0.0
     for document_index, token_count in enumerate(token_counts):
-        valid = np.isfinite(directions[document_index]).all(axis=1)
+        valid = (
+            np.isfinite(directions[document_index]).all(axis=1)
+            if dimension
+            else np.zeros(int(token_count), dtype=bool)
+        )
         if not np.any(valid):
-            raise ValueError(
-                f"document {document_index} produced no finite leave-one-out directions"
-            )
+            skipped_document_indices.append(document_index)
+            continue
+        document_indices.append(document_index)
         valid_positions = np.flatnonzero(valid)
         unit_directions = directions[document_index][valid]
         mean_direction = unit_directions.mean(axis=0)
@@ -308,10 +312,20 @@ def build_style_loo_waves(
         ]
         waves.append(np.stack(channels, axis=0).astype(np.float32, copy=False))
 
+    stacked_waves = (
+        np.stack(waves, axis=0).astype(np.float32, copy=False)
+        if waves
+        else np.empty((0, len(STYLE_CHANNEL_NAMES), cfg.output_length), dtype=np.float32)
+    )
+    kept = np.asarray(document_indices, dtype=np.int64)
     return StyleWaveBatch(
-        waves=np.stack(waves, axis=0).astype(np.float32, copy=False),
-        token_counts=token_counts,
-        context_counts=np.asarray([len(value) for value in contexts_by_document], dtype=np.int32),
+        waves=stacked_waves,
+        document_indices=kept,
+        skipped_document_indices=np.asarray(skipped_document_indices, dtype=np.int64),
+        token_counts=token_counts[kept],
+        context_counts=np.asarray(
+            [len(contexts_by_document[index]) for index in document_indices], dtype=np.int32
+        ),
         eligible_token_counts=np.asarray(eligible_counts, dtype=np.int32),
         document_direction_concentrations=np.asarray(concentrations, dtype=np.float32),
         magnitude_sum=magnitude_sum,
@@ -328,4 +342,3 @@ __all__ = [
     "build_style_loo_waves",
     "tokenize_document_contexts",
 ]
-

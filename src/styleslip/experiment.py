@@ -365,10 +365,10 @@ def build_parser() -> argparse.ArgumentParser:
         prog="styleslip-experiment",
         description="Run cached Style-LOO experiments on M4, Deepfake, or RAID.",
     )
-    parser.add_argument("--dataset", default="raid", choices=("m4", "deepfake", "raid", "all"))
+    parser.add_argument("--dataset", default="deepfake", choices=("m4", "deepfake", "raid", "all"))
     parser.add_argument(
         "--scenario",
-        default="clean",
+        default="unseen_domains",
         help=(
             "M4: monolingual/multilingual/both; Deepfake: cross_domains_cross_models/"
             "unseen_models/unseen_domains/all; RAID: clean/attacked/both"
@@ -381,11 +381,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--list", action="store_true", help="List selected cases without processing data")
     parser.add_argument("--dry-run", action="store_true", help="Show inputs and cache targets")
     parser.add_argument("--prepare-only", default=False, action="store_true")
-    parser.add_argument("--samples-per-class", type=_positive_int)
+    parser.add_argument("--samples-per-class", type=_positive_int,default=1000, help="Number of samples per class for train/val/test")
     parser.add_argument("--ood-samples-per-class", type=_positive_int)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--deduplicate", action=argparse.BooleanOptionalAction, default=True)
-    parser.add_argument("--overlap-policy", choices=("error", "drop", "allow"), default="error")
+    parser.add_argument("--overlap-policy", choices=("error", "drop", "allow"), default="allow", help="How to handle overlap between train/val/test/ood")
     parser.add_argument("--evaluate-ood", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--reuse-results", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--refresh-feature-cache", action="store_true")
@@ -393,7 +393,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     parser.add_argument(
         "--style-model",
-        default=str(DEFAULT_MODEL_PATH) if DEFAULT_MODEL_PATH.is_dir() else "StyleDistance/styledistance_synthetic_only",
+        default="./model/styledistance_synthetic_only",
     )
     parser.add_argument("--style-device", default="cuda")
     parser.add_argument("--style-cache-folder", type=Path)

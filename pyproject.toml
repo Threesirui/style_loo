@@ -23,6 +23,7 @@ dev = ["pytest>=8,<10"]
 [project.scripts]
 styleslip = "styleslip.cli:main"
 styleslip-experiment = "styleslip.experiment:main"
+styleslip-baselines = "styleslip.baselines.runner:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

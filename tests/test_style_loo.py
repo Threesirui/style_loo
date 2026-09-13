@@ -42,6 +42,11 @@ class RecordingStyleEncoder(FakeStyleEncoder):
         return super().encode(sentences, **kwargs)
 
 
+class ConstantStyleEncoder:
+    def encode(self, sentences: Sequence[str], **_: object) -> np.ndarray:
+        return np.ones((len(sentences), 12), dtype=np.float32)
+
+
 def single_sentence(text: str) -> list[str]:
     return [text]
 
@@ -110,3 +115,25 @@ def test_deletion_embedding_output_is_memory_bounded() -> None:
     assert encoder.call_sizes[0] == 5
     assert max(encoder.call_sizes[1:]) <= 17
 
+
+def test_document_with_no_finite_directions_is_reported_as_skipped() -> None:
+    result = build_style_loo_waves(
+        ConstantStyleEncoder(),
+        ["Several alphabetic words are present."],
+        config=StyleLooConfig(output_length=8),
+        sentence_tokenizer=single_sentence,
+    )
+    assert result.waves.shape == (0, 3, 8)
+    assert result.document_indices.tolist() == []
+    assert result.skipped_document_indices.tolist() == [0]
+
+
+def test_document_without_eligible_alphabetic_tokens_is_skipped() -> None:
+    result = build_style_loo_waves(
+        FakeStyleEncoder(),
+        ["... !!!"],
+        config=StyleLooConfig(output_length=8),
+        sentence_tokenizer=single_sentence,
+    )
+    assert result.waves.shape == (0, 3, 8)
+    assert result.skipped_document_indices.tolist() == [0]
