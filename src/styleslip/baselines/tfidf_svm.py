@@ -96,9 +96,20 @@ class TfidfSVM:
         validation_texts: Sequence[str] | None = None,
         validation_labels: np.ndarray | None = None,
         c_grid: Sequence[float] | None = None,
+        show_progress: bool = False,
     ) -> "TfidfSVM":
         labels = np.asarray(labels, dtype=np.int64)
+        if show_progress:
+            print(
+                f"Fitting {self.profile} TF-IDF vectorizer on {len(texts)} training documents",
+                flush=True,
+            )
         train_matrix = self.vectorizer.fit_transform(texts)
+        if show_progress:
+            print(
+                f"Training sparse matrix: {train_matrix.shape[0]} × {train_matrix.shape[1]}",
+                flush=True,
+            )
         candidates = [self.c]
         if self.profile == "enhanced" and c_grid:
             candidates = sorted({float(value) for value in c_grid})
@@ -112,6 +123,8 @@ class TfidfSVM:
         )
         fitted: list[tuple[float, float, LinearSVC]] = []
         for value in candidates:
+            if show_progress:
+                print(f"Training LinearSVC with C={value:g}", flush=True)
             classifier = clone(self.classifier).set_params(C=value)
             classifier.fit(train_matrix, labels)
             score = (
@@ -120,12 +133,24 @@ class TfidfSVM:
                 else float("nan")
             )
             self.validation_scores_[format(value, "g")] = score
+            if show_progress and np.isfinite(score):
+                print(f"Validation F1 at C={value:g}: {score:.6f}", flush=True)
             fitted.append((score, value, classifier))
         # Highest validation F1; deterministic tie break favours stronger regularization.
         _, self.c, self.classifier = max(fitted, key=lambda item: (item[0], -item[1]))
+        if show_progress:
+            print(f"Selected LinearSVC C={self.c:g}", flush=True)
         return self
 
-    def predict_score(self, texts: Sequence[str]) -> np.ndarray:
+    def predict_score(
+        self,
+        texts: Sequence[str],
+        *,
+        show_progress: bool = False,
+        split: str = "evaluation",
+    ) -> np.ndarray:
+        if show_progress:
+            print(f"Transforming and scoring {len(texts)} {split} documents", flush=True)
         return self._scores(self.classifier, self.vectorizer.transform(texts))
 
     def specification(self) -> dict[str, object]:

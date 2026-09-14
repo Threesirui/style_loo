@@ -6,7 +6,7 @@ import json
 
 import numpy as np
 
-from styleslip.baselines.runner import main
+from styleslip.baselines.runner import build_parser, main
 from styleslip.baselines.stylometric_lr import (
     BERTAA_CODE_FEATURE_NAMES,
     EXTRACTED_FEATURE_NAMES,
@@ -47,6 +47,13 @@ def test_pan25_vectorizer_matches_official_constructor() -> None:
     assert params["max_features"] == 1000
     assert params["sublinear_tf"] is False
     assert model.classifier.get_params()["C"] == 1.0
+
+
+def test_runner_defaults_to_all_records_with_progress() -> None:
+    args = build_parser().parse_args([])
+    assert args.samples_per_class is None
+    assert args.ood_samples_per_class is None
+    assert args.progress is True
 
 
 def test_enhanced_vocabulary_is_fit_on_train_only() -> None:

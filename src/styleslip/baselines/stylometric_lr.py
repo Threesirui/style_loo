@@ -13,6 +13,7 @@ from typing import Iterable, Literal
 
 import numpy as np
 from sklearn.linear_model import LogisticRegression
+from tqdm.auto import tqdm
 
 
 LETTERS = tuple("abcdefghijklmnopqrstuvwxyz")
@@ -103,16 +104,58 @@ class StylometricLR:
     def feature_names(self) -> tuple[str, ...]:
         return BERTAA_CODE_FEATURE_NAMES if self.profile == "bertaa_code" else EXTRACTED_FEATURE_NAMES
 
-    def transform(self, texts: Iterable[str]) -> np.ndarray:
-        matrix = np.vstack([extract_stylometric_features(text) for text in texts])
+    def transform(
+        self,
+        texts: Iterable[str],
+        *,
+        show_progress: bool = False,
+        description: str = "Stylometric features",
+    ) -> np.ndarray:
+        values = list(texts)
+        iterator = tqdm(
+            values,
+            desc=description,
+            unit="doc",
+            dynamic_ncols=True,
+            disable=not show_progress,
+        )
+        matrix = np.vstack([extract_stylometric_features(text) for text in iterator])
         return matrix[:, BERTAA_CODE_INDICES] if self.profile == "bertaa_code" else matrix
 
-    def fit(self, texts: Iterable[str], labels: np.ndarray) -> "StylometricLR":
-        self.classifier.fit(self.transform(texts), np.asarray(labels, dtype=np.int64))
+    def fit(
+        self,
+        texts: Iterable[str],
+        labels: np.ndarray,
+        *,
+        show_progress: bool = False,
+    ) -> "StylometricLR":
+        matrix = self.transform(
+            texts,
+            show_progress=show_progress,
+            description="Train stylometric features",
+        )
+        if show_progress:
+            print(
+                f"Fitting LogisticRegression on {matrix.shape[0]} documents × "
+                f"{matrix.shape[1]} features",
+                flush=True,
+            )
+        self.classifier.fit(matrix, np.asarray(labels, dtype=np.int64))
         return self
 
-    def predict_score(self, texts: Iterable[str]) -> np.ndarray:
-        probabilities = self.classifier.predict_proba(self.transform(texts))
+    def predict_score(
+        self,
+        texts: Iterable[str],
+        *,
+        show_progress: bool = False,
+        split: str = "evaluation",
+    ) -> np.ndarray:
+        matrix = self.transform(
+            texts,
+            show_progress=show_progress,
+            description=f"{split.capitalize()} stylometric features",
+        )
+        probabilities = self.classifier.predict_proba(matrix)
         positive = int(np.flatnonzero(self.classifier.classes_ == 1)[0])
         return np.asarray(probabilities[:, positive], dtype=np.float64)
 

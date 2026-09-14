@@ -98,6 +98,9 @@ def _load(
 ) -> tuple[list[TextRecord], InvalidRecordReport]:
     offset = {"train": 0, "source": 0, "validation": 1, "test": 2, "ood": 3}[source.split]
     limit = args.ood_samples_per_class if source.split == "ood" else args.samples_per_class
+    if args.progress:
+        limit_text = "all available records" if limit is None else f"up to {limit} records per class"
+        print(f"Loading {source.split}: {source.path.resolve()} ({limit_text})", flush=True)
     report = InvalidRecordReport()
     records = load_source(
         source,
@@ -107,6 +110,14 @@ def _load(
         invalid_policy=args.invalid_record_policy,
         invalid_report=report,
     )
+    if args.progress:
+        y = np.asarray([record.label for record in records])
+        print(
+            f"Loaded {source.split}: {len(records)} valid documents "
+            f"(human={int(np.sum(y == 0))}, AI={int(np.sum(y == 1))}, "
+            f"skipped={report.total})",
+            flush=True,
+        )
     return records, report
 
 
@@ -174,9 +185,10 @@ def _fit_model(model, method: str, splits: dict[str, list[TextRecord]], args: ar
             validation_texts=texts(splits["validation"]),
             validation_labels=labels(splits["validation"]),
             c_grid=args.c_grid if method == "enhanced_tfidf_svm" else None,
+            show_progress=args.progress,
         )
     else:
-        model.fit(train_texts, train_labels)
+        model.fit(train_texts, train_labels, show_progress=args.progress)
 
 
 def _source_manifest(case: ExperimentCase, include_ood: bool) -> dict[str, object]:
@@ -271,6 +283,8 @@ def run_method(
     ):
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         if manifest.get("status") == "completed" and manifest.get("run_hash") == run_hash:
+            if args.progress:
+                print(f"Reusing completed result: {run_dir}", flush=True)
             return {
                 "method": method,
                 "case": case.slug,
@@ -282,7 +296,15 @@ def run_method(
     run_dir.mkdir(parents=True, exist_ok=True)
     model = _make_model(method, args)
     _fit_model(model, method, splits, args)
-    scores = {name: model.predict_score(texts(records)) for name, records in splits.items()}
+    scores = {
+        name: model.predict_score(
+            texts(records),
+            show_progress=args.progress,
+            split=name,
+        )
+        for name, records in splits.items()
+        if name != "train"
+    }
     threshold = (
         select_threshold(labels(splits["validation"]), scores["validation"])
         if args.threshold_mode == "validation_f1"
@@ -305,6 +327,17 @@ def run_method(
             if name != "train"
         },
     }
+    if args.progress:
+        print(f"Selected decision threshold: {threshold:.6f} ({args.threshold_mode})", flush=True)
+        for name in ("validation", "test", "ood"):
+            if name in result_metrics:
+                values = result_metrics[name]
+                print(
+                    f"{name}: AUROC={values['auroc']:.6f}, "
+                    f"accuracy={values['accuracy']:.6f}, F1={values['f1']:.6f}, "
+                    f"samples={values['samples']}",
+                    flush=True,
+                )
     for name, records in splits.items():
         if name != "train":
             write_predictions(run_dir / f"{name}_predictions.csv", records, scores[name], threshold, name)
@@ -410,7 +443,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--method", action="append", choices=METHODS)
     parser.add_argument("--data-root", type=Path, default=PROJECT_ROOT / "data")
     parser.add_argument("--output-dir", type=Path, default=PROJECT_ROOT / "outputs" / "baselines")
-    parser.add_argument("--samples-per-class", type=_positive_int)
+    parser.add_argument(
+        "--samples-per-class",
+        type=_positive_int,
+        default=None,
+        help="Maximum records per class for train/validation/test (default: all)",
+    )
     parser.add_argument("--ood-samples-per-class", type=_positive_int)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--deduplicate", action=argparse.BooleanOptionalAction, default=True)
@@ -431,6 +469,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--stylo-profile", choices=("bertaa_code", "paper_full"), default="bertaa_code")
     parser.add_argument("--reuse-results", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--refresh-results", action="store_true")
+    parser.add_argument(
+        "--progress",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Show data loading, training, model selection, and evaluation progress",
+    )
     parser.add_argument("--list", action="store_true", help="List cases and exit")
     parser.add_argument("--dry-run", action="store_true", help="Show planned case/method pairs and exit")
     return parser

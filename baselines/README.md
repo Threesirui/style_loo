@@ -64,6 +64,13 @@ handling are shared with StyleSlip. Vectorizers and classifiers see only `train`
 see only `validation`; test and OOD data are evaluation-only. Both validation-selected and fixed-0.5 metrics are
 written so results can be compared under the StyleSlip protocol or the upstream classifier decision boundary.
 
+By default, `--samples-per-class` is unlimited: every valid record in each split is used. Pass an integer to run a
+bounded experiment, for example `--samples-per-class 1000`. Full Enhanced TF-IDF can require substantial memory
+because its word and character vocabularies are fitted on the complete training corpus.
+
+Progress output is enabled by default and reports split loading/counts, feature construction, each SVM `C`
+candidate, threshold selection, and validation/test/OOD metric summaries. Use `--no-progress` for quiet batch logs.
+
 Baseline runs default to `--invalid-record-policy skip`. A malformed individual record (for example invalid JSON,
 whitespace-only text, an illegal label, or incomplete required fields) is skipped and audited under
 `split_details.invalid_records` in the manifest. The report contains totals, reasons, and at most 20 source
