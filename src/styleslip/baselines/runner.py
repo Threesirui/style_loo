@@ -15,7 +15,14 @@ from typing import Sequence
 import numpy as np
 import sklearn
 
-from styleslip.datasets import ExperimentCase, SourceSpec, discover_cases, load_source, source_identity
+from styleslip.datasets import (
+    ExperimentCase,
+    InvalidRecordReport,
+    SourceSpec,
+    discover_cases,
+    load_source,
+    source_identity,
+)
 from styleslip.io import TextRecord
 
 from .common import (
@@ -44,6 +51,7 @@ class EvaluationConfig:
     ood_samples_per_class: int | None
     deduplicate: bool
     overlap_policy: str
+    invalid_record_policy: str
     val_size: float
     test_size: float
     threshold_mode: str
@@ -85,21 +93,28 @@ def _selected_cases(args: argparse.Namespace) -> list[ExperimentCase]:
     )
 
 
-def _load(source: SourceSpec, args: argparse.Namespace) -> list[TextRecord]:
+def _load(
+    source: SourceSpec, args: argparse.Namespace
+) -> tuple[list[TextRecord], InvalidRecordReport]:
     offset = {"train": 0, "source": 0, "validation": 1, "test": 2, "ood": 3}[source.split]
     limit = args.ood_samples_per_class if source.split == "ood" else args.samples_per_class
-    return load_source(
+    report = InvalidRecordReport()
+    records = load_source(
         source,
         samples_per_class=limit,
         seed=args.seed + offset,
         deduplicate=args.deduplicate,
+        invalid_policy=args.invalid_record_policy,
+        invalid_report=report,
     )
+    return records, report
 
 
 def _prepare_splits(
     case: ExperimentCase, args: argparse.Namespace
 ) -> tuple[dict[str, list[TextRecord]], dict[str, object]]:
-    source_records = _load(case.train, args)
+    source_records, train_invalid = _load(case.train, args)
+    invalid_records = {case.train.split: train_invalid.to_dict()}
     if case.protocol == "internal-group-split":
         train, validation, test, indices = group_split_records(
             source_records,
@@ -114,8 +129,10 @@ def _prepare_splits(
         }
     else:
         assert case.validation is not None and case.test is not None
-        validation_records = _load(case.validation, args)
-        test_records = _load(case.test, args)
+        validation_records, validation_invalid = _load(case.validation, args)
+        test_records, test_invalid = _load(case.test, args)
+        invalid_records["validation"] = validation_invalid.to_dict()
+        invalid_records["test"] = test_invalid.to_dict()
         train, validation, test, overlap_counts = apply_overlap_policy(
             source_records,
             validation_records,
@@ -123,9 +140,11 @@ def _prepare_splits(
             policy=args.overlap_policy,
         )
         details = {"strategy": "dataset-authored", "overlap_counts": overlap_counts}
+    details["invalid_records"] = invalid_records
     splits = {"train": train, "validation": validation, "test": test}
     if args.evaluate_ood and case.ood is not None:
-        splits["ood"] = _load(case.ood, args)
+        splits["ood"], ood_invalid = _load(case.ood, args)
+        invalid_records["ood"] = ood_invalid.to_dict()
         details["ood_overlap_with_train_validation_test"] = overlap_with_reference(
             [*train, *validation, *test], splits["ood"]
         )
@@ -225,6 +244,7 @@ def run_method(
         ood_samples_per_class=args.ood_samples_per_class,
         deduplicate=args.deduplicate,
         overlap_policy=args.overlap_policy,
+        invalid_record_policy=args.invalid_record_policy,
         val_size=args.val_size,
         test_size=args.test_size,
         threshold_mode=args.threshold_mode,
@@ -390,11 +410,17 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--method", action="append", choices=METHODS)
     parser.add_argument("--data-root", type=Path, default=PROJECT_ROOT / "data")
     parser.add_argument("--output-dir", type=Path, default=PROJECT_ROOT / "outputs" / "baselines")
-    parser.add_argument("--samples-per-class", type=_positive_int, default=1000)
+    parser.add_argument("--samples-per-class", type=_positive_int)
     parser.add_argument("--ood-samples-per-class", type=_positive_int)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--deduplicate", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--overlap-policy", choices=("error", "drop", "allow"), default="error")
+    parser.add_argument(
+        "--invalid-record-policy",
+        choices=("skip", "error"),
+        default="skip",
+        help="Skip malformed individual records with a manifest audit, or fail immediately",
+    )
     parser.add_argument("--evaluate-ood", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--val-size", type=_fraction, default=0.15)
     parser.add_argument("--test-size", type=_fraction, default=0.15)

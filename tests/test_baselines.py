@@ -102,6 +102,19 @@ def test_baseline_runner_smoke(tmp_path) -> None:
         ("The generated answer is orderly and predictable.", 1),
     ]
     _write_m4(base / "subtaskA_train_monolingual.jsonl", train_rows)
+    with (base / "subtaskA_train_monolingual.jsonl").open("a", encoding="utf-8") as handle:
+        handle.write(
+            json.dumps(
+                {
+                    "id": "blank-record",
+                    "text": "\r",
+                    "label": 1,
+                    "model": "davinci",
+                    "source": "chinese",
+                }
+            )
+            + "\n{broken json\n"
+        )
     _write_m4(base / "subtaskA_dev_monolingual.jsonl", validation_rows)
     _write_m4(base / "subtaskA_test_monolingual.jsonl", test_rows)
     output = tmp_path / "outputs"
@@ -132,5 +145,8 @@ def test_baseline_runner_smoke(tmp_path) -> None:
         manifest = json.loads(path.read_text(encoding="utf-8"))
         assert manifest["status"] == "completed"
         assert manifest["fit_scope"]["test_or_ood_used_for_fit"] is False
+        invalid_train = manifest["split_details"]["invalid_records"]["train"]
+        assert invalid_train["total"] == 2
+        assert invalid_train["reasons"] == {"invalid JSON": 1, "text is empty": 1}
         assert (path.parent / "model.pkl").is_file()
         assert (path.parent / "test_predictions.csv").is_file()

@@ -64,6 +64,12 @@ handling are shared with StyleSlip. Vectorizers and classifiers see only `train`
 see only `validation`; test and OOD data are evaluation-only. Both validation-selected and fixed-0.5 metrics are
 written so results can be compared under the StyleSlip protocol or the upstream classifier decision boundary.
 
+Baseline runs default to `--invalid-record-policy skip`. A malformed individual record (for example invalid JSON,
+whitespace-only text, an illegal label, or incomplete required fields) is skipped and audited under
+`split_details.invalid_records` in the manifest. The report contains totals, reasons, and at most 20 source
+locations. Structural errors such as a missing file or an invalid CSV header still stop the run. Use
+`--invalid-record-policy error` for the original fail-fast behavior. Source dataset files are never modified.
+
 Outputs are stored under `outputs/baselines/<method>/<dataset>/<scenario>/<case>/<hash>/` and include the model,
 manifest, metrics, and per-split predictions. The manifest records upstream provenance, runtime versions, split
 sizes, overlap counts, and exactly which splits affected fitting.

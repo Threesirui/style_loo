@@ -6,6 +6,7 @@ import csv
 import hashlib
 import json
 import random
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterator, Literal
@@ -14,6 +15,38 @@ from .io import TextRecord, text_fingerprint
 
 
 DatasetName = Literal["m4", "deepfake", "raid"]
+
+
+@dataclass(slots=True)
+class InvalidRecordReport:
+    """Bounded audit trail for records skipped by tolerant loaders."""
+
+    total: int = 0
+    reasons: Counter[str] | None = None
+    examples: list[dict[str, str]] | None = None
+    max_examples: int = 20
+
+    def __post_init__(self) -> None:
+        if self.reasons is None:
+            self.reasons = Counter()
+        if self.examples is None:
+            self.examples = []
+
+    def add(self, *, location: str, reason: str) -> None:
+        self.total += 1
+        assert self.reasons is not None and self.examples is not None
+        self.reasons[reason] += 1
+        if len(self.examples) < self.max_examples:
+            self.examples.append({"location": location, "reason": reason})
+
+    def to_dict(self) -> dict[str, Any]:
+        assert self.reasons is not None and self.examples is not None
+        return {
+            "total": self.total,
+            "reasons": dict(sorted(self.reasons.items())),
+            "examples": list(self.examples),
+            "examples_truncated": self.total > len(self.examples),
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,27 +120,88 @@ def _select_bounded(
     return selected
 
 
-def _iter_m4(path: Path) -> Iterator[TextRecord]:
+def _reject_or_skip(
+    *,
+    location: str,
+    reason: str,
+    invalid_policy: Literal["error", "skip"],
+    invalid_report: InvalidRecordReport,
+    cause: Exception | None = None,
+) -> None:
+    message = f"{location}: {reason}"
+    if invalid_policy == "error":
+        if cause is not None:
+            raise ValueError(message) from cause
+        raise ValueError(message)
+    invalid_report.add(location=location, reason=reason)
+
+
+def _iter_m4(
+    path: Path,
+    *,
+    invalid_policy: Literal["error", "skip"],
+    invalid_report: InvalidRecordReport,
+) -> Iterator[TextRecord]:
     with path.open("r", encoding="utf-8") as handle:
         for line_number, line in enumerate(handle, start=1):
             if not line.strip():
                 continue
+            location = f"{path} line {line_number}"
             try:
                 raw = json.loads(line)
             except json.JSONDecodeError as exc:
-                raise ValueError(f"{path} line {line_number}: invalid JSON") from exc
+                _reject_or_skip(
+                    location=location,
+                    reason="invalid JSON",
+                    invalid_policy=invalid_policy,
+                    invalid_report=invalid_report,
+                    cause=exc,
+                )
+                continue
+            if not isinstance(raw, dict):
+                _reject_or_skip(
+                    location=location,
+                    reason="expected a JSON object",
+                    invalid_policy=invalid_policy,
+                    invalid_report=invalid_report,
+                )
+                continue
             text = raw.get("text")
             label = raw.get("label")
             model = raw.get("model")
             source = raw.get("source", raw.get("domain"))
             if not isinstance(text, str) or not text.strip():
-                raise ValueError(f"{path} line {line_number}: text is empty")
+                _reject_or_skip(
+                    location=location,
+                    reason="text is empty",
+                    invalid_policy=invalid_policy,
+                    invalid_report=invalid_report,
+                )
+                continue
             if isinstance(label, bool) or label not in (0, 1):
-                raise ValueError(f"{path} line {line_number}: label must be 0 or 1")
+                _reject_or_skip(
+                    location=location,
+                    reason="label must be 0 or 1",
+                    invalid_policy=invalid_policy,
+                    invalid_report=invalid_report,
+                )
+                continue
             if not isinstance(model, str) or not model.strip():
-                raise ValueError(f"{path} line {line_number}: model is empty")
+                _reject_or_skip(
+                    location=location,
+                    reason="model is empty",
+                    invalid_policy=invalid_policy,
+                    invalid_report=invalid_report,
+                )
+                continue
             if not isinstance(source, str) or not source.strip():
-                raise ValueError(f"{path} line {line_number}: source/domain is empty")
+                _reject_or_skip(
+                    location=location,
+                    reason="source/domain is empty",
+                    invalid_policy=invalid_policy,
+                    invalid_report=invalid_report,
+                )
+                continue
             record_id = str(raw.get("id", f"{path.stem}:{line_number}"))
             yield TextRecord(
                 text=text,
@@ -128,7 +222,12 @@ def _parse_bool(value: str, *, location: str) -> bool:
     raise ValueError(f"{location}: is_human must be true/false")
 
 
-def _iter_deepfake(path: Path) -> Iterator[TextRecord]:
+def _iter_deepfake(
+    path: Path,
+    *,
+    invalid_policy: Literal["error", "skip"],
+    invalid_report: InvalidRecordReport,
+) -> Iterator[TextRecord]:
     with path.open("r", encoding="utf-8-sig", newline="") as handle:
         reader = csv.DictReader(handle)
         required = {"text", "label", "domain", "is_human", "model"}
@@ -138,16 +237,43 @@ def _iter_deepfake(path: Path) -> Iterator[TextRecord]:
             location = f"{path} row {row_number}"
             text = (raw.get("text") or "").strip()
             domain = (raw.get("domain") or "").strip()
-            is_human = _parse_bool(raw.get("is_human") or "", location=location)
             try:
+                is_human = _parse_bool(raw.get("is_human") or "", location=location)
                 source_label = int((raw.get("label") or "").strip())
             except ValueError as exc:
-                raise ValueError(f"{location}: label must be 0 or 1") from exc
+                _reject_or_skip(
+                    location=location,
+                    reason=str(exc).removeprefix(f"{location}: "),
+                    invalid_policy=invalid_policy,
+                    invalid_report=invalid_report,
+                    cause=exc,
+                )
+                continue
+            if source_label not in (0, 1):
+                _reject_or_skip(
+                    location=location,
+                    reason="label must be 0 or 1",
+                    invalid_policy=invalid_policy,
+                    invalid_report=invalid_report,
+                )
+                continue
             if source_label != (1 if is_human else 0):
-                raise ValueError(f"{location}: label conflicts with is_human")
+                _reject_or_skip(
+                    location=location,
+                    reason="label conflicts with is_human",
+                    invalid_policy=invalid_policy,
+                    invalid_report=invalid_report,
+                )
+                continue
             model = (raw.get("model") or "").strip()
             if not text or not domain or (not is_human and not model):
-                raise ValueError(f"{location}: text/domain/model is incomplete")
+                _reject_or_skip(
+                    location=location,
+                    reason="text/domain/model is incomplete",
+                    invalid_policy=invalid_policy,
+                    invalid_report=invalid_report,
+                )
+                continue
             record_id = f"{path.parent.name}/{path.stem}:{row_number - 1}"
             yield TextRecord(
                 text=text,
@@ -159,7 +285,12 @@ def _iter_deepfake(path: Path) -> Iterator[TextRecord]:
             )
 
 
-def _iter_raid(path: Path) -> Iterator[TextRecord]:
+def _iter_raid(
+    path: Path,
+    *,
+    invalid_policy: Literal["error", "skip"],
+    invalid_report: InvalidRecordReport,
+) -> Iterator[TextRecord]:
     csv.field_size_limit(2**31 - 1)
     with path.open("r", encoding="utf-8-sig", newline="") as handle:
         reader = csv.DictReader(handle)
@@ -174,7 +305,13 @@ def _iter_raid(path: Path) -> Iterator[TextRecord]:
             source_id = (raw.get("source_id") or record_id).strip()
             attack = (raw.get("attack") or "none").strip() or "none"
             if not text.strip() or not model or not domain or not record_id:
-                raise ValueError(f"{path} row {row_number}: incomplete RAID record")
+                _reject_or_skip(
+                    location=f"{path} row {row_number}",
+                    reason="incomplete RAID record",
+                    invalid_policy=invalid_policy,
+                    invalid_report=invalid_report,
+                )
+                continue
             is_human = model.casefold() == "human"
             yield TextRecord(
                 text=text,
@@ -193,17 +330,27 @@ def load_source(
     samples_per_class: int | None,
     seed: int,
     deduplicate: bool = False,
+    invalid_policy: Literal["error", "skip"] = "error",
+    invalid_report: InvalidRecordReport | None = None,
 ) -> list[TextRecord]:
     """Load one split with deterministic per-class reservoir sampling."""
 
+    if invalid_policy not in {"error", "skip"}:
+        raise ValueError("invalid_policy must be error or skip")
     path = source.path.expanduser().resolve()
     if not path.is_file():
         raise FileNotFoundError(f"dataset split does not exist: {path}")
-    iterator = {
+    report = invalid_report if invalid_report is not None else InvalidRecordReport()
+    iterator_factory = {
         "m4": _iter_m4,
         "deepfake": _iter_deepfake,
         "raid": _iter_raid,
-    }[source.format](path)
+    }[source.format]
+    iterator = iterator_factory(
+        path,
+        invalid_policy=invalid_policy,
+        invalid_report=report,
+    )
     return _select_bounded(
         iterator,
         samples_per_class=samples_per_class,
@@ -334,6 +481,7 @@ def source_identity(source: SourceSpec) -> dict[str, Any]:
 
 __all__ = [
     "ExperimentCase",
+    "InvalidRecordReport",
     "SourceSpec",
     "discover_cases",
     "load_source",

@@ -5,7 +5,9 @@ from __future__ import annotations
 import csv
 import json
 
-from styleslip.datasets import SourceSpec, discover_cases, load_source
+import pytest
+
+from styleslip.datasets import InvalidRecordReport, SourceSpec, discover_cases, load_source
 
 
 def test_m4_discovery_uses_only_subtask_a(tmp_path) -> None:
@@ -51,3 +53,31 @@ def test_raid_derives_labels_and_preserves_source_groups(tmp_path) -> None:
     assert {record.group_id for record in records} == {"source-h", "source-a"}
     assert {record.attack for record in records} == {"none", "synonym"}
 
+
+def test_tolerant_m4_loader_skips_and_audits_bad_individual_records(tmp_path) -> None:
+    path = tmp_path / "split.jsonl"
+    rows = [
+        {"id": "h", "text": "Valid human text.", "label": 0, "model": "human", "source": "news"},
+        {"id": "blank", "text": "\r", "label": 1, "model": "davinci", "source": "chinese"},
+        {"id": "a", "text": "Valid generated text.", "label": 1, "model": "gpt", "source": "news"},
+    ]
+    path.write_text(
+        "\n".join([json.dumps(rows[0]), json.dumps(rows[1]), "{broken json", json.dumps(rows[2])]) + "\n",
+        encoding="utf-8",
+    )
+    source = SourceSpec(path, "m4", "train")
+    with pytest.raises(ValueError, match="text is empty"):
+        load_source(source, samples_per_class=None, seed=42)
+
+    report = InvalidRecordReport()
+    records = load_source(
+        source,
+        samples_per_class=None,
+        seed=42,
+        invalid_policy="skip",
+        invalid_report=report,
+    )
+    assert {record.id for record in records} == {"h", "a"}
+    assert report.total == 2
+    assert report.reasons == {"invalid JSON": 1, "text is empty": 1}
+    assert report.to_dict()["examples_truncated"] is False
