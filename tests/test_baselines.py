@@ -7,6 +7,7 @@ import json
 import numpy as np
 
 from styleslip.baselines.runner import build_parser, main
+from styleslip.baselines.common import metrics
 from styleslip.baselines.stylometric_lr import (
     BERTAA_CODE_FEATURE_NAMES,
     EXTRACTED_FEATURE_NAMES,
@@ -54,6 +55,32 @@ def test_runner_defaults_to_all_records_with_progress() -> None:
     assert args.samples_per_class is None
     assert args.ood_samples_per_class is None
     assert args.progress is True
+
+
+def test_official_neural_baseline_defaults_match_released_settings() -> None:
+    args = build_parser().parse_args([])
+    assert args.xlmr_model == "xlm-roberta-base"
+    assert args.xlmr_seed == 0
+    assert (args.fast_sampling_model, args.fast_scoring_model) == (
+        "gpt-j-6B",
+        "gpt-neo-2.7B",
+    )
+    assert (args.binoculars_observer, args.binoculars_performer) == (
+        "tiiuae/falcon-7b",
+        "tiiuae/falcon-7b-instruct",
+    )
+    assert args.binoculars_max_length == 512
+    assert args.binoculars_mode == "low-fpr"
+
+
+def test_unbounded_detector_score_does_not_report_brier() -> None:
+    values = metrics(
+        np.asarray([0, 1]),
+        np.asarray([-0.2, 1.2]),
+        threshold=0.5,
+    )
+    assert values["auroc"] == 1.0
+    assert values["brier"] is None
 
 
 def test_enhanced_vocabulary_is_fit_on_train_only() -> None:

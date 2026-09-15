@@ -78,10 +78,11 @@ JSONL 和 CSV 默认读取 `text` 与可选的 `label` 字段；标签可以是 
 
 测试使用确定性的假编码器，不下载模型，也不占用 GPU。
 
-## 论文与开源代码可追溯的传统基线
+## 论文与开源代码可追溯的基线
 
 新增的 `baselines/` 入口实现 `Enhanced TF-IDF-SVM` 与 `Stylometric-LR`，并另外保留
-PAN'25 官方 TF-IDF-SVM 的严格配置。来源、论文/源码差异、运行命令和输出协议见
+PAN'25 官方 TF-IDF-SVM 的严格配置；同时接入官方 XLM-R 微调、Fast-DetectGPT 与
+Binoculars 源码。来源、论文/源码差异、运行命令、硬件约束和输出协议见
 [`baselines/README.md`](baselines/README.md)。默认运行用户要求的前两项：
 
 ```powershell

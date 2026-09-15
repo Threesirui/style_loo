@@ -1,0 +1,25 @@
+{
+  "SemEval2024-task8": {
+    "repository": "https://github.com/mbzuai-nlp/SemEval2024-task8",
+    "commit": "d8350c840bc505eaba06b4baf69993c2d18fef5e",
+    "license": "Apache-2.0",
+    "entrypoint": "SemEval2024-task8-main/subtaskA/baseline/transformer_baseline.py",
+    "entrypoint_sha256": "5c7574d7f43e6bb2f4c00cb1913d46e9c5b5cb4624e395766d5ed346c453c1bc"
+  },
+  "fast-detect-gpt": {
+    "repository": "https://github.com/baoguangsheng/fast-detect-gpt",
+    "commit": "971b05202bac2bb504d60c0ac0812fea7a8f7c82",
+    "license": "MIT",
+    "entrypoint": "fast-detect-gpt-main/scripts/local_infer.py",
+    "entrypoint_sha256": "4cbe06cdb456df729ce9eede14505757775bc388f4c17d762a6b28f57b169cb0",
+    "criterion_sha256": "70fcdafca0182a4e5f9773d82f435cf06610f291bca60ff726ef0d2ff255a929",
+    "custom_datasets_sha256": "163fc8d576251da5a5ee22ddd3c909c30feea0686f29a7ed25765b7d2b8ebb74"
+  },
+  "Binoculars": {
+    "repository": "https://github.com/ahans30/Binoculars",
+    "commit": "c8ae2f90d50ee696418bc71d8d9e5020e5f9d7b8",
+    "license": "BSD-3-Clause",
+    "entrypoint": "Binoculars-main/binoculars/detector.py",
+    "entrypoint_sha256": "9724932e34a78e019c949ee986b34593f66e58f5975c9e76e359621ee0d1aade"
+  }
+}

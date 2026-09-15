@@ -1,10 +1,11 @@
-"""Run paper-traceable classical baselines on StyleSlip dataset protocols."""
+"""Run paper/source-traceable baselines on StyleSlip dataset protocols."""
 
 from __future__ import annotations
 
 import argparse
 import csv
 import hashlib
+import importlib.metadata
 import json
 import pickle
 import platform
@@ -38,10 +39,32 @@ from .common import (
 )
 from .stylometric_lr import StylometricLR
 from .tfidf_svm import PAN25_COMMIT, TfidfSVM
+from .upstream_adapters import (
+    BINOCULARS_COMMIT,
+    FAST_DETECT_COMMIT,
+    SEMEVAL_COMMIT,
+    OfficialBinocularsAdapter,
+    OfficialFastDetectGPTAdapter,
+    SemEvalXLMRAdapter,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
-METHODS = ("enhanced_tfidf_svm", "stylometric_lr", "pan25_tfidf_svm")
+METHODS = (
+    "enhanced_tfidf_svm",
+    "stylometric_lr",
+    "pan25_tfidf_svm",
+    "xlm_roberta_base_ft",
+    "fast_detect_gpt",
+    "binoculars",
+)
+
+
+def _package_version(name: str) -> str | None:
+    try:
+        return importlib.metadata.version(name)
+    except importlib.metadata.PackageNotFoundError:
+        return None
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,6 +82,7 @@ class EvaluationConfig:
     stylo_profile: str
     word_max_features: int | None
     char_max_features: int | None
+    method_config: dict[str, object]
 
 
 def _scenario(dataset: str, requested: str) -> str:
@@ -162,7 +186,37 @@ def _prepare_splits(
     return splits, details
 
 
-def _make_model(method: str, args: argparse.Namespace):
+def _method_config(method: str, args: argparse.Namespace) -> dict[str, object]:
+    if method == "xlm_roberta_base_ft":
+        return {"model": args.xlmr_model, "seed": args.xlmr_seed}
+    if method == "fast_detect_gpt":
+        return {
+            "sampling_model": args.fast_sampling_model,
+            "scoring_model": args.fast_scoring_model,
+            "device": args.fast_device,
+            "cache_dir": str(args.fast_cache_dir.expanduser().resolve()),
+        }
+    if method == "binoculars":
+        return {
+            "observer_model": args.binoculars_observer,
+            "performer_model": args.binoculars_performer,
+            "max_length": args.binoculars_max_length,
+            "mode": args.binoculars_mode,
+            "batch_size": args.binoculars_batch_size,
+        }
+    if method == "stylometric_lr":
+        return {"profile": args.stylo_profile}
+    if method == "pan25_tfidf_svm":
+        return {"profile": "pan25"}
+    return {
+        "profile": "enhanced",
+        "word_max_features": args.word_max_features,
+        "char_max_features": args.char_max_features,
+        "c_grid": list(args.c_grid),
+    }
+
+
+def _make_model(method: str, args: argparse.Namespace, run_dir: Path):
     if method == "stylometric_lr":
         return StylometricLR(profile=args.stylo_profile)
     if method == "pan25_tfidf_svm":
@@ -172,6 +226,27 @@ def _make_model(method: str, args: argparse.Namespace):
             profile="enhanced",
             word_max_features=args.word_max_features,
             char_max_features=args.char_max_features,
+        )
+    if method == "xlm_roberta_base_ft":
+        return SemEvalXLMRAdapter(
+            model_name=args.xlmr_model,
+            run_dir=run_dir,
+            seed=args.xlmr_seed,
+        )
+    if method == "fast_detect_gpt":
+        return OfficialFastDetectGPTAdapter(
+            sampling_model=args.fast_sampling_model,
+            scoring_model=args.fast_scoring_model,
+            device=args.fast_device,
+            cache_dir=args.fast_cache_dir.expanduser().resolve(),
+        )
+    if method == "binoculars":
+        return OfficialBinocularsAdapter(
+            observer_model=args.binoculars_observer,
+            performer_model=args.binoculars_performer,
+            max_length=args.binoculars_max_length,
+            mode=args.binoculars_mode,
+            batch_size=args.binoculars_batch_size,
         )
     raise ValueError(f"unknown baseline method: {method}")
 
@@ -185,6 +260,14 @@ def _fit_model(model, method: str, splits: dict[str, list[TextRecord]], args: ar
             validation_texts=texts(splits["validation"]),
             validation_labels=labels(splits["validation"]),
             c_grid=args.c_grid if method == "enhanced_tfidf_svm" else None,
+            show_progress=args.progress,
+        )
+    elif method == "xlm_roberta_base_ft":
+        model.fit(
+            train_texts,
+            train_labels,
+            validation_texts=texts(splits["validation"]),
+            validation_labels=labels(splits["validation"]),
             show_progress=args.progress,
         )
     else:
@@ -218,6 +301,33 @@ def _run_hash(
 
 
 def _provenance(method: str) -> dict[str, object]:
+    if method == "xlm_roberta_base_ft":
+        return {
+            "upstream": "mbzuai-nlp/SemEval2024-task8",
+            "url": "https://github.com/mbzuai-nlp/SemEval2024-task8",
+            "commit": SEMEVAL_COMMIT,
+            "license": "Apache-2.0",
+            "upstream_file": "subtaskA/baseline/transformer_baseline.py",
+            "relationship": "official training function with dataset/split adapter",
+        }
+    if method == "fast_detect_gpt":
+        return {
+            "upstream": "baoguangsheng/fast-detect-gpt",
+            "url": "https://github.com/baoguangsheng/fast-detect-gpt",
+            "commit": FAST_DETECT_COMMIT,
+            "license": "MIT",
+            "upstream_files": ["scripts/local_infer.py", "scripts/fast_detect_gpt.py"],
+            "relationship": "direct call to official FastDetectGPT implementation",
+        }
+    if method == "binoculars":
+        return {
+            "upstream": "ahans30/Binoculars",
+            "url": "https://github.com/ahans30/Binoculars",
+            "commit": BINOCULARS_COMMIT,
+            "license": "BSD-3-Clause",
+            "upstream_file": "binoculars/detector.py",
+            "relationship": "direct call to official Binoculars implementation",
+        }
     if method in {"enhanced_tfidf_svm", "pan25_tfidf_svm"}:
         return {
             "upstream": "pan-webis-de/pan25-generative-ai-authorship-verification",
@@ -264,6 +374,7 @@ def run_method(
         stylo_profile=args.stylo_profile,
         word_max_features=args.word_max_features,
         char_max_features=args.char_max_features,
+        method_config=_method_config(method, args),
     )
     sources = _source_manifest(case, args.evaluate_ood)
     run_hash = _run_hash(case, method, config, sources)
@@ -277,12 +388,16 @@ def run_method(
     )
     metrics_path = run_dir / "metrics.json"
     manifest_path = run_dir / "experiment_manifest.json"
-    model_path = run_dir / "model.pkl"
     if args.reuse_results and not args.refresh_results and all(
-        path.is_file() for path in (metrics_path, manifest_path, model_path)
+        path.is_file() for path in (metrics_path, manifest_path)
     ):
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        if manifest.get("status") == "completed" and manifest.get("run_hash") == run_hash:
+        artifact = run_dir / str(manifest.get("model_artifact", "model.pkl"))
+        if (
+            manifest.get("status") == "completed"
+            and manifest.get("run_hash") == run_hash
+            and artifact.exists()
+        ):
             if args.progress:
                 print(f"Reusing completed result: {run_dir}", flush=True)
             return {
@@ -294,7 +409,7 @@ def run_method(
             }
 
     run_dir.mkdir(parents=True, exist_ok=True)
-    model = _make_model(method, args)
+    model = _make_model(method, args, run_dir)
     _fit_model(model, method, splits, args)
     scores = {
         name: model.predict_score(
@@ -305,15 +420,21 @@ def run_method(
         for name, records in splits.items()
         if name != "train"
     }
-    threshold = (
-        select_threshold(labels(splits["validation"]), scores["validation"])
-        if args.threshold_mode == "validation_f1"
-        else 0.5
+    native_threshold = float(getattr(model, "native_threshold", 0.5))
+    validation_f1_threshold = select_threshold(
+        labels(splits["validation"]), scores["validation"]
     )
+    if args.threshold_mode == "validation_f1":
+        threshold = validation_f1_threshold
+    elif args.threshold_mode == "native":
+        threshold = native_threshold
+    else:
+        threshold = 0.5
+    selected_on = "validation" if args.threshold_mode == "validation_f1" else None
     result_metrics = {
         "threshold_selection": {
             "mode": args.threshold_mode,
-            "selected_on": "validation" if args.threshold_mode == "validation_f1" else None,
+            "selected_on": selected_on,
             "value": threshold,
         },
         **{
@@ -325,6 +446,22 @@ def run_method(
             name: metrics(labels(records), scores[name], 0.5)
             for name, records in splits.items()
             if name != "train"
+        },
+        "native_threshold": {
+            "value": native_threshold,
+            "splits": {
+                name: metrics(labels(records), scores[name], native_threshold)
+                for name, records in splits.items()
+                if name != "train"
+            },
+        },
+        "validation_f1_threshold": {
+            "value": validation_f1_threshold,
+            "splits": {
+                name: metrics(labels(records), scores[name], validation_f1_threshold)
+                for name, records in splits.items()
+                if name != "train"
+            },
         },
     }
     if args.progress:
@@ -341,8 +478,13 @@ def run_method(
     for name, records in splits.items():
         if name != "train":
             write_predictions(run_dir / f"{name}_predictions.csv", records, scores[name], threshold, name)
-    with model_path.open("wb") as handle:
-        pickle.dump(model, handle)
+    if hasattr(model, "save_artifact"):
+        model_artifact = model.save_artifact(run_dir)
+    else:
+        model_path = run_dir / "model.pkl"
+        with model_path.open("wb") as handle:
+            pickle.dump(model, handle)
+        model_artifact = "model.pkl"
     write_json(metrics_path, result_metrics)
     write_json(
         manifest_path,
@@ -352,13 +494,24 @@ def run_method(
             "case": case.slug,
             "protocol": case.protocol,
             "method": method,
+            "method_config": _method_config(method, args),
+            "model_artifact": model_artifact,
             "model_specification": model.specification(),
             "evaluation_config": asdict(config),
             "split_details": split_details,
             "split_sizes": {name: len(records) for name, records in splits.items()},
             "fit_scope": {
-                "vectorizers_and_model": ["train"],
-                "hyperparameters": ["validation"] if method == "enhanced_tfidf_svm" else [],
+                "vectorizers_and_model": (
+                    [] if method in {"fast_detect_gpt", "binoculars"} else ["train"]
+                ),
+                "hyperparameters": (
+                    ["validation"]
+                    if method == "enhanced_tfidf_svm"
+                    else []
+                ),
+                "checkpoint_selection": (
+                    ["validation"] if method == "xlm_roberta_base_ft" else []
+                ),
                 "threshold": ["validation"] if args.threshold_mode == "validation_f1" else [],
                 "test_or_ood_used_for_fit": False,
             },
@@ -368,6 +521,8 @@ def run_method(
                 "python": platform.python_version(),
                 "numpy": np.__version__,
                 "scikit_learn": sklearn.__version__,
+                "torch": _package_version("torch"),
+                "transformers": _package_version("transformers"),
             },
             "blind_test": str(case.blind_test.resolve()) if case.blind_test else None,
             "blind_test_evaluated": False,
@@ -435,12 +590,12 @@ def _c_grid(value: str) -> tuple[float, ...]:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="styleslip-baselines",
-        description="Run Enhanced TF-IDF-SVM and paper/source-traceable classical baselines.",
+        description="Run paper/source-traceable supervised and zero-shot detector baselines.",
     )
     parser.add_argument("--dataset", default="m4", choices=("m4", "deepfake", "raid", "all"))
-    parser.add_argument("--scenario", default="auto")
+    parser.add_argument("--scenario", default="monolingual")
     parser.add_argument("--case", help="Substring filter for Deepfake case directories")
-    parser.add_argument("--method", action="append", choices=METHODS)
+    parser.add_argument("--method", action="append",default=['xlm_roberta_base_ft'], choices=METHODS)
     parser.add_argument("--data-root", type=Path, default=PROJECT_ROOT / "data")
     parser.add_argument("--output-dir", type=Path, default=PROJECT_ROOT / "outputs" / "baselines")
     parser.add_argument(
@@ -462,11 +617,37 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--evaluate-ood", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--val-size", type=_fraction, default=0.15)
     parser.add_argument("--test-size", type=_fraction, default=0.15)
-    parser.add_argument("--threshold-mode", choices=("validation_f1", "fixed_0_5"), default="validation_f1")
+    parser.add_argument(
+        "--threshold-mode",
+        choices=("validation_f1", "fixed_0_5", "native"),
+        default="validation_f1",
+    )
     parser.add_argument("--c-grid", type=_c_grid, default=(0.01, 0.1, 1.0, 10.0))
     parser.add_argument("--word-max-features", type=_positive_int, default=100_000)
     parser.add_argument("--char-max-features", type=_positive_int, default=200_000)
     parser.add_argument("--stylo-profile", choices=("bertaa_code", "paper_full"), default="bertaa_code")
+    parser.add_argument("--xlmr-model", default="xlm-roberta-base")
+    parser.add_argument(
+        "--xlmr-seed",
+        type=int,
+        default=0,
+        help="Official SemEval baseline training seed (default: 0)",
+    )
+    parser.add_argument("--fast-sampling-model", default="gpt-j-6B")
+    parser.add_argument("--fast-scoring-model", default="gpt-neo-2.7B")
+    parser.add_argument("--fast-device", default="cuda")
+    parser.add_argument(
+        "--fast-cache-dir",
+        type=Path,
+        default=PROJECT_ROOT / "model" / "fast_detect_gpt",
+    )
+    parser.add_argument("--binoculars-observer", default="tiiuae/falcon-7b")
+    parser.add_argument("--binoculars-performer", default="tiiuae/falcon-7b-instruct")
+    parser.add_argument("--binoculars-max-length", type=_positive_int, default=512)
+    parser.add_argument(
+        "--binoculars-mode", choices=("low-fpr", "accuracy"), default="low-fpr"
+    )
+    parser.add_argument("--binoculars-batch-size", type=_positive_int, default=1)
     parser.add_argument("--reuse-results", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--refresh-results", action="store_true")
     parser.add_argument(
@@ -492,6 +673,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             "case": case.slug,
             "protocol": case.protocol,
             "method": method,
+            "method_config": _method_config(method, args),
             "train": str(case.train.path.resolve()),
             "validation": str(case.validation.path.resolve()) if case.validation else "internal group split",
             "test": str(case.test.path.resolve()) if case.test else "internal group split",

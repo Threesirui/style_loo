@@ -18,6 +18,15 @@ dependencies = [
 
 [project.optional-dependencies]
 model = ["sentence-transformers>=5,<6"]
+neural-baselines = [
+  "accelerate>=1,<2",
+  "datasets>=3,<5",
+  "evaluate>=0.4,<1",
+  "pandas>=2,<3",
+  "scipy>=1.11,<2",
+  "sentencepiece>=0.2,<1",
+  "transformers>=4.31,<6",
+]
 dev = ["pytest>=8,<10"]
 
 [project.scripts]

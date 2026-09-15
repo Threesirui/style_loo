@@ -42,6 +42,9 @@ def select_threshold(y_true: np.ndarray, scores: np.ndarray) -> float:
 
 
 def metrics(y_true: np.ndarray, scores: np.ndarray, threshold: float) -> dict[str, object]:
+    scores = np.asarray(scores, dtype=np.float64)
+    if not np.all(np.isfinite(scores)):
+        raise ValueError("detector scores must all be finite")
     predictions = (scores >= threshold).astype(np.int64)
     precision, recall, f1, _ = precision_recall_fscore_support(
         y_true, predictions, average="binary", zero_division=0
@@ -54,7 +57,13 @@ def metrics(y_true: np.ndarray, scores: np.ndarray, threshold: float) -> dict[st
         "precision": float(precision),
         "recall": float(recall),
         "f1": float(f1),
-        "brier": float(brier_score_loss(y_true, scores)),
+        # Brier score is defined for probability predictions. Binoculars emits
+        # an unbounded ratio score, so it is intentionally unavailable there.
+        "brier": (
+            float(brier_score_loss(y_true, scores))
+            if np.all((scores >= 0.0) & (scores <= 1.0))
+            else None
+        ),
         "threshold": float(threshold),
         "confusion_matrix": confusion_matrix(y_true, predictions, labels=[0, 1]).astype(int).tolist(),
     }
